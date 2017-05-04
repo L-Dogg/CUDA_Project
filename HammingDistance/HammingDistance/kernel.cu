@@ -31,8 +31,6 @@ void calculateUsingCPU(uint64_t** seq, int uints_required, int* distances);
 
 int main(int argc, char ** argv)
 {
-	srand(time(nullptr));
-
 	int uints_required = SEQUENCE_LENGTH / UINT64_CAPACITY;
 	int blocks_count = (uints_required + BLOCK_SIZE - 1) / BLOCK_SIZE;
 	int reduce_output_length = uints_required / (BLOCK_SIZE << 1);
@@ -51,18 +49,23 @@ int main(int argc, char ** argv)
 	distances = (int *)malloc(SEQUENCES_COUNT * SEQUENCES_COUNT * sizeof(int));
 
 	printf("Generating sequences.\n");
+	clock_t begin = clock();
 	generateSequences(seq, uints_required, reduce_output, blocks_count);
+	clock_t end = clock();
+
+	double elapsed_secs = double(end - begin) / CLOCKS_PER_SEC;
+	printf("Generated sequences. Time elapsed %fs.\n", elapsed_secs);
 
 	printf("Starting CUDA computation.\n");
-
-	clock_t begin = clock();
+	begin = clock();
 	int ret = calculateUsingCuda(seq, dev_seq, distances, dev_distances,
 		reduce_output, dev_reduce_output, reduce_output_length, uints_required, blocks_count);
-	clock_t end = clock();
+	end = clock();
+
 	if (ret != 0)
 		return -1;
 
-	double elapsed_secs = double(end - begin) / CLOCKS_PER_SEC;
+	elapsed_secs = double(end - begin) / CLOCKS_PER_SEC;
 	int pairs = countPairs(distances);
 	printf("Found %d pairs. Time elapsed %fs.\n", pairs, elapsed_secs);
 
@@ -86,25 +89,26 @@ int main(int argc, char ** argv)
 
 void generateSequences(uint64_t** seq, int uints_required, int** reduce_output, int blocks_count)
 {
-	//seq[0] = (uint64_t *)malloc(uints_required * sizeof(uint64_t));
-	//reduce_output[0] = (int*)malloc(sizeof(int) * blocks_count);
-	//seq[1] = (uint64_t *)malloc(uints_required * sizeof(uint64_t));
-	//reduce_output[1] = (int*)malloc(sizeof(int) * blocks_count);
-	//for (int j = 0; j < uints_required; j++)
-	//	for (int k = 0; k <= 63; k++)
-	//	{
-	//		uint64_t val = (uint64_t)(rand() % 2) << k;
-	//		seq[0][j] += val;
-	//		seq[1][j] += val;
-	//	}
+	seq[0] = (uint64_t *)malloc(uints_required * sizeof(uint64_t));
+	reduce_output[0] = (int*)malloc(sizeof(int) * blocks_count);
+	seq[1] = (uint64_t *)malloc(uints_required * sizeof(uint64_t));
+	reduce_output[1] = (int*)malloc(sizeof(int) * blocks_count);
+	for (int j = 0; j < uints_required; j++)
+		for (int k = 0; k <= 63; k++)
+		{
+			uint64_t val = (uint64_t)(rand() % 2) << k;
+			seq[0][j] += val;
+			seq[1][j] += val;
+		}
 
-	//if (seq[0][0] & 0x1)
-	//	seq[1][0] -= 1;
-	//else
-	//	seq[1][0] += 1;
+	if (seq[0][0] & 0x1)
+		seq[1][0] -= 1;
+	else
+		seq[1][0] += 1;
 
-	for (int i = 0; i < SEQUENCES_COUNT; i++)
+	for (int i = 2; i < SEQUENCES_COUNT; i++)
 	{
+		srand(2137 + i);
 		seq[i] = (uint64_t *)malloc(uints_required * sizeof(uint64_t));
 		reduce_output[i] = (int*)malloc(sizeof(int) * blocks_count);
 		for (int j = 0; j < uints_required; j++)

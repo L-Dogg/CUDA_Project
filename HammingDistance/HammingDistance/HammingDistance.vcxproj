@@ -19,7 +19,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
-    <CudaCompile Include="..\..\..\..\..\Desktop\kernel.cu" />
+    <CudaCompile Include="kernel.cu" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{02BE64CC-E3E2-4948-B85D-FDEE447EC1FA}</ProjectGuid>
