@@ -54,7 +54,8 @@ int main(int argc, char ** argv)
 	clock_t end = clock();
 
 	double elapsed_secs = double(end - begin) / CLOCKS_PER_SEC;
-	printf("Generated sequences. Time elapsed %fs.\n", elapsed_secs);
+	printf("Generated sequences. Time elapsed: %fs.\n", elapsed_secs);
+	printf("Sequences count: %d, sequence length: %d\n", SEQUENCES_COUNT, SEQUENCE_LENGTH);
 
 	printf("Starting CUDA computation.\n");
 	begin = clock();
@@ -67,7 +68,7 @@ int main(int argc, char ** argv)
 
 	elapsed_secs = double(end - begin) / CLOCKS_PER_SEC;
 	int pairs = countPairs(distances);
-	printf("Found %d pairs. Time elapsed %fs.\n", pairs, elapsed_secs);
+	printf("Found %d pairs. Time elapsed: %fs.\n", pairs, elapsed_secs);
 
 	cudaFree(dev_seq);
 	cudaFree(dev_distances);
@@ -82,39 +83,33 @@ int main(int argc, char ** argv)
 
 	pairs = countPairs(distances);
 	elapsed_secs = double(end - begin) / CLOCKS_PER_SEC;
-	printf("Found %d pairs. Time elapsed %fs.\n", pairs, elapsed_secs);
+	printf("Found %d pairs. Time elapsed: %fs.\n", pairs, elapsed_secs);
 
 	return 0;
 }
 
 void generateSequences(uint64_t** seq, int uints_required, int** reduce_output, int blocks_count)
 {
-	seq[0] = (uint64_t *)malloc(uints_required * sizeof(uint64_t));
-	reduce_output[0] = (int*)malloc(sizeof(int) * blocks_count);
-	seq[1] = (uint64_t *)malloc(uints_required * sizeof(uint64_t));
-	reduce_output[1] = (int*)malloc(sizeof(int) * blocks_count);
-	for (int j = 0; j < uints_required; j++)
-		for (int k = 0; k <= 63; k++)
-		{
-			uint64_t val = (uint64_t)(rand() % 2) << k;
-			seq[0][j] += val;
-			seq[1][j] += val;
-		}
-
-	if (seq[0][0] & 0x1)
-		seq[1][0] -= 1;
-	else
-		seq[1][0] += 1;
-
-	for (int i = 2; i < SEQUENCES_COUNT; i++)
+	for (int i = 0; i < SEQUENCES_COUNT; i++)
 	{
 		srand(2137 + i);
 		seq[i] = (uint64_t *)malloc(uints_required * sizeof(uint64_t));
 		reduce_output[i] = (int*)malloc(sizeof(int) * blocks_count);
-		for (int j = 0; j < uints_required; j++)
-			for (int k = 0; k <= 63; k++)
-				seq[i][j] += (uint64_t)(rand() % 2) << k;
+		for (int k = 1; k <= 63; k++)
+		{
+			uint64_t bit = (uint64_t)(rand() % 2) << k;
+			for (int j = 0; j < uints_required; j++)
+				seq[i][j] += bit;
+		}
+
+		// First half should have last bit set to 1
+		if (i < SEQUENCES_COUNT / 2 && !(seq[i][0] & 0x1))
+			seq[i][0] += 1;
+		// Second half should have last bit set to 0
+		else if (i > SEQUENCES_COUNT / 2 && (seq[i][0] & 0x1))
+			seq[i][0] -= 1;		
 	}
+
 }
 
 int countPairs(int* distances)
@@ -153,6 +148,7 @@ int calculateUsingCuda(uint64_t** seq, uint64_t** dev_seq,
 
 	for (int i = 0; i < SEQUENCES_COUNT; i++)
 	{
+		// Allocate memory on the device for bit sequence
 		cudaStatus = cudaMalloc(&dev_seq[i], uints_required * sizeof(uint64_t));
 		if (cudaStatus != cudaSuccess)
 		{
@@ -160,6 +156,7 @@ int calculateUsingCuda(uint64_t** seq, uint64_t** dev_seq,
 			goto Error;
 		}
 
+		// Copy bit sequence from host to the device
 		cudaStatus = cudaMemcpy(dev_seq[i], seq[i], uints_required * sizeof(uint64_t), cudaMemcpyHostToDevice);
 		if (cudaStatus != cudaSuccess)
 		{
@@ -167,6 +164,7 @@ int calculateUsingCuda(uint64_t** seq, uint64_t** dev_seq,
 			goto Error;
 		}
 
+		// Allocate memory on the device for reduce output
 		cudaStatus = cudaMalloc(&dev_reduce_output[i], sizeof(int) * reduce_output_length);
 		if (cudaStatus != cudaSuccess)
 		{
@@ -174,6 +172,7 @@ int calculateUsingCuda(uint64_t** seq, uint64_t** dev_seq,
 			goto Error;
 		}
 
+		// Init reduce output with zeros
 		cudaMemset(dev_reduce_output[i], 0, sizeof(int) * reduce_output_length);
 		if (cudaStatus != cudaSuccess)
 		{
@@ -195,7 +194,7 @@ int calculateUsingCuda(uint64_t** seq, uint64_t** dev_seq,
 	}
 
 	sums = (int *)malloc(SEQUENCES_COUNT * sizeof(int));
-	memset(sums, 0, SEQUENCES_COUNT);
+	memset(sums, 0, SEQUENCES_COUNT * sizeof(int));
 
 	for (int i = 0; i < SEQUENCES_COUNT; i++)
 	{
@@ -203,11 +202,6 @@ int calculateUsingCuda(uint64_t** seq, uint64_t** dev_seq,
 		if (cudaStatus != cudaSuccess)
 		{
 			fprintf(stderr, "cudaMemcpy failed! - reduce output\n");
-			fprintf(stderr, "i = %d, status = %s\n", i, cudaGetErrorString(cudaStatus));
-			if (reduce_output[i] == nullptr)
-				fprintf(stderr, "reduce_output null\n");
-			if (reduce_output[i] == nullptr)
-				fprintf(stderr, "dev_reduce_output null");
 			goto Error;
 		}
 		for (int j = 0; j < reduce_output_length; j++)
@@ -294,6 +288,7 @@ __global__ void reduce(uint64_t* input, int* output, int len)
 		partialSum[t] = bitCount(input[start + t]);
 	else
 		partialSum[t] = 0;
+
 	if (start + BLOCK_SIZE + t < len)
 		partialSum[BLOCK_SIZE + t] = bitCount(input[start + BLOCK_SIZE + t]);
 	else
